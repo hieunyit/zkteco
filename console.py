@@ -75,14 +75,16 @@ class SafeScan(cmd.Cmd):
             print("[*] Usage: command_exec <cmd>\n[*] Output will not be returned, but you could write to a file and get it afterwards\n")
             return True
         try:
-            payload = ('; ' + line + '; echo \x00\x00').encode()
+            payload = b"; " + line.encode() + b"; echo \x00\x00"
 
             # prepare data
-            self.z.send_command(1500, struct.pack('<II', len(payload), len(payload)))
+            payload_len = len(payload)
+            self.z.send_command(defs.CMD_PREPARE_DATA,
+                                struct.pack('<II', payload_len, payload_len))
             self.z.recv_reply()
 
             # send data
-            self.z.send_command(1501, payload)
+            self.z.send_command(defs.CMD_DATA, payload)
             self.z.recv_reply()
 
             # apply data
