@@ -133,6 +133,11 @@ class SafeScan(cmd.Cmd):
         ascii_preview = payload.decode('latin-1', errors='replace')
         hex_preview = payload.hex()
 
+        req_code = getattr(self.z, "last_request_code", None)
+        req_payload = getattr(self.z, "last_request_payload", bytearray())
+        req_ascii = req_payload.decode('latin-1', errors='replace')
+        req_hex = req_payload.hex()
+
         packet = getattr(self.z, "last_packet", bytearray()) or bytearray()
         packet_hex = packet.hex()
 
@@ -141,6 +146,10 @@ class SafeScan(cmd.Cmd):
             hex_preview = hex_preview[:max_hex] + "..."
         if len(packet_hex) > max_hex:
             packet_hex = packet_hex[:max_hex] + "..."
+        if len(req_hex) > max_hex:
+            req_hex = req_hex[:max_hex] + "..."
+        if len(req_ascii) > max_hex:
+            req_ascii = req_ascii[:max_hex] + "..."
 
         header = packet[:16]
         header_hex = header.hex()
@@ -151,6 +160,8 @@ class SafeScan(cmd.Cmd):
             f"[!] {prefix}: {hex(code)} ({reason}) "
             f"session={self.z.last_session_code} reply={self.z.last_reply_counter} "
             f"payload_len={len(payload)} size_field={size} "
+            f"request_cmd={hex(req_code) if req_code is not None else 'unknown'} "
+            f"request_len={len(req_payload)} request_ascii={req_ascii!r} request_hex={req_hex} "
             f"ascii={ascii_preview!r} hex={hex_preview} "
             f"header_hex={header_hex} packet_hex={packet_hex}"
         )

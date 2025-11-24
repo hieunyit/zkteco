@@ -239,7 +239,11 @@ class PacketMixin:
             of the payload.
         :return: None.
         """
-        self.send_packet(self.create_packet(cmd, data))
+        packet = self.create_packet(cmd, data)
+        self.last_request_code = cmd
+        self.last_request_payload = bytearray(data) if data else bytearray()
+        self.last_request_packet = packet
+        self.send_packet(packet)
 
     def send_packet(self, zkp):
         """

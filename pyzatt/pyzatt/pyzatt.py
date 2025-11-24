@@ -165,6 +165,9 @@ class ZKSS(PacketMixin, DataUserMixin,
         self._recv_buffer = bytearray()  # buffer for partial socket reads
         self.last_packet = bytearray()   # last fully received packet
         self.last_reply_size = 0         # reported payload size of last reply
+        self.last_request_code = None    # last outbound command code
+        self.last_request_payload = bytearray()  # payload sent with last command
+        self.last_request_packet = bytearray()   # full packet for last command
 
     def add_user(self, user_sn):
         """
