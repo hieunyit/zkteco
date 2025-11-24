@@ -70,8 +70,7 @@ class PacketMixin:
         :return: Bytearray, received data,
             also stored in last_payload_data.
         """
-        zkp = self.soc_zk.recv(buff_size)
-        zkp = bytearray(zkp)
+        zkp = self.recv_packet(buff_size)
         self.parse_ans(zkp)
         self.reply_number += 1
 
@@ -108,6 +107,11 @@ class PacketMixin:
         elif self.last_reply_code == DEFS.CMD_ACK_OK:
             # device sent the dataset with additional commands, i.e. longer
             # dataset, see ex_data spec
+            if len(self.last_payload_data) < 5:
+                print("ACK payload too short to contain size info:",
+                      self.last_payload_data)
+                return dataset
+
             print(self.last_payload_data)
             size_info = struct.unpack('<I', self.last_payload_data[1:5])[0]
 
@@ -118,7 +122,11 @@ class PacketMixin:
             self.send_command(DEFS.CMD_DATA_RDY, data=bytearray(rdy_struct))
 
             # receives the prepare data reply
-            self.recv_packet(24)
+            prep_pkt = self.recv_packet(24)
+            self.parse_ans(prep_pkt)
+            self.reply_number += 1
+            if self.last_reply_code != DEFS.CMD_PREPARE_DATA:
+                return dataset
 
             # receives packet with long dataset
             dataset = bytearray()
@@ -135,10 +143,15 @@ class PacketMixin:
             self.send_command(DEFS.CMD_FREE_DATA)
 
             # receive acknowledge
-            self.recv_packet(buff_size)
+            ack_pkt = self.recv_packet(buff_size)
+            self.parse_ans(ack_pkt)
 
             # update reply counter
             self.reply_number += 1
+
+        self.last_payload_data = dataset
+        if dataset:
+            self.last_reply_code = DEFS.CMD_DATA
 
         return dataset
 
@@ -149,15 +162,42 @@ class PacketMixin:
         :param buff_size: Int, buffer size used for socket receive.
         :return: Bytearray, received data.
         """
-        zkp = self.recv_data(buff_size)
+        # ensure buffer exists
+        if not hasattr(self, '_recv_buffer'):
+            self._recv_buffer = bytearray()
+
+        # keep reading until we have at least a full header
+        while len(self._recv_buffer) < 8:
+            self._recv_buffer += self.recv_data(buff_size)
+
+        # discard any leading garbage before the start tag
+        start_tag = bytes(DEFS.START_TAG)
+        tag_pos = self._recv_buffer.find(start_tag)
+        while tag_pos not in (0, -1):
+            self._recv_buffer = self._recv_buffer[tag_pos:]
+            break
+
+        # ensure the buffer actually contains the start tag
+        while self._recv_buffer[:4] != start_tag:
+            self._recv_buffer += self.recv_data(buff_size)
+            tag_pos = self._recv_buffer.find(start_tag)
+            if tag_pos == -1:
+                continue
+            if tag_pos:
+                self._recv_buffer = self._recv_buffer[tag_pos:]
+
         # extracts size of the total packet
-        total_size = 8 + struct.unpack('<H', zkp[4:6])[0]
-        rem_recv = total_size - len(zkp)
+        while len(self._recv_buffer) < 6:
+            self._recv_buffer += self.recv_data(buff_size)
+        total_size = 8 + struct.unpack('<H', self._recv_buffer[4:6])[0]
+
         # keeps reading until it receives the complete packet
-        while len(zkp) < total_size:
-            zkp += self.recv_data(rem_recv)
-            rem_recv = total_size - len(zkp)
-        return zkp
+        while len(self._recv_buffer) < total_size:
+            self._recv_buffer += self.recv_data(buff_size)
+
+        packet = self._recv_buffer[:total_size]
+        self._recv_buffer = self._recv_buffer[total_size:]
+        return packet
 
     def recv_data(self, buff_size=4096):
         """
@@ -199,7 +239,11 @@ class PacketMixin:
             of the payload.
         :return: None.
         """
-        self.send_packet(self.create_packet(cmd, data))
+        packet = self.create_packet(cmd, data)
+        self.last_request_code = cmd
+        self.last_request_payload = bytearray(data) if data else bytearray()
+        self.last_request_packet = packet
+        self.send_packet(packet)
 
     def send_packet(self, zkp):
         """
@@ -254,6 +298,19 @@ class PacketMixin:
         self.last_reply_counter = struct.unpack('<H', zkp[14:16])[0]
 
         self.last_payload_data = zkp[16:]
+
+        if hasattr(self, "last_reply_history"):
+            summary = {
+                "code": self.last_reply_code,
+                "session": self.last_session_code,
+                "counter": self.last_reply_counter,
+                "payload_len": len(self.last_payload_data),
+                "size_field": self.last_reply_size,
+                "payload_hex": self.last_payload_data[:32].hex(),
+            }
+            self.last_reply_history.append(summary)
+            if len(self.last_reply_history) > 6:
+                self.last_reply_history = self.last_reply_history[-6:]
 
     def recvd_ack(self):
         """

@@ -162,7 +162,14 @@ class ZKSS(PacketMixin, DataUserMixin,
         self.users = {}                 # dict of ZKUser, the key is the id
         self.att_log = []               # list of attendance entries
         self.op_log = []                # list of operation entries
-
+        self._recv_buffer = bytearray()  # buffer for partial socket reads
+        self.last_packet = bytearray()   # last fully received packet
+        self.last_reply_size = 0         # reported payload size of last reply
+        self.last_request_code = None    # last outbound command code
+        self.last_request_payload = bytearray()  # payload sent with last command
+        self.last_request_packet = bytearray()   # full packet for last command
+        self.last_reply_history = []     # trailing list of received reply summaries
+        
     def add_user(self, user_sn):
         """
         Appends an empty user instance, given the user index,

