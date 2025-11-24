@@ -168,7 +168,8 @@ class ZKSS(PacketMixin, DataUserMixin,
         self.last_request_code = None    # last outbound command code
         self.last_request_payload = bytearray()  # payload sent with last command
         self.last_request_packet = bytearray()   # full packet for last command
-
+        self.last_reply_history = []     # trailing list of received reply summaries
+        
     def add_user(self, user_sn):
         """
         Appends an empty user instance, given the user index,

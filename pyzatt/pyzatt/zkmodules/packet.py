@@ -299,6 +299,19 @@ class PacketMixin:
 
         self.last_payload_data = zkp[16:]
 
+        if hasattr(self, "last_reply_history"):
+            summary = {
+                "code": self.last_reply_code,
+                "session": self.last_session_code,
+                "counter": self.last_reply_counter,
+                "payload_len": len(self.last_payload_data),
+                "size_field": self.last_reply_size,
+                "payload_hex": self.last_payload_data[:32].hex(),
+            }
+            self.last_reply_history.append(summary)
+            if len(self.last_reply_history) > 6:
+                self.last_reply_history = self.last_reply_history[-6:]
+
     def recvd_ack(self):
         """
         Checks if the last reply returned an acknowledge packet.

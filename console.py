@@ -83,6 +83,12 @@ class SafeScan(cmd.Cmd):
             data = payload if data_payload is None else data_payload
             data_len = len(data) if length is None else length
 
+            self.z.last_prepare_summary = {
+                "prepare_len": len(payload),
+                "data_len": len(data),
+                "length_override": length,
+            }
+
             prep_header = struct.pack('<II', data_len, data_len)
             self.z.send_command(defs.CMD_PREPARE_DATA, prep_header)
             self.z.recv_reply()
@@ -115,6 +121,10 @@ class SafeScan(cmd.Cmd):
 
             apply_payload = bytearray(struct.pack('<I', 1700))
             apply_payload.extend(payload)
+            self.z.last_apply_summary = {
+                "apply_code": 110,
+                "apply_len": len(apply_payload),
+            }
             self.z.send_command(110, apply_payload)
             self.z.recv_reply()
             if not self.z.recvd_ack():
@@ -138,6 +148,9 @@ class SafeScan(cmd.Cmd):
         req_ascii = req_payload.decode('latin-1', errors='replace')
         req_hex = req_payload.hex()
 
+        req_packet = getattr(self.z, "last_request_packet", bytearray())
+        req_packet_hex = req_packet.hex()
+
         packet = getattr(self.z, "last_packet", bytearray()) or bytearray()
         packet_hex = packet.hex()
 
@@ -150,11 +163,25 @@ class SafeScan(cmd.Cmd):
             req_hex = req_hex[:max_hex] + "..."
         if len(req_ascii) > max_hex:
             req_ascii = req_ascii[:max_hex] + "..."
+        if len(req_packet_hex) > max_hex:
+            req_packet_hex = req_packet_hex[:max_hex] + "..."
 
         header = packet[:16]
         header_hex = header.hex()
 
         size = getattr(self.z, "last_reply_size", len(packet) - 8)
+
+        prep = getattr(self.z, "last_prepare_summary", {})
+        apply = getattr(self.z, "last_apply_summary", {})
+
+        history_entries = []
+        for entry in getattr(self.z, "last_reply_history", [])[-3:]:
+            history_entries.append(
+                f"code={hex(entry['code'])} session={entry['session']} "
+                f"reply={entry['counter']} len={entry['payload_len']} size={entry['size_field']} "
+                f"hex={entry['payload_hex']}"
+            )
+        history_desc = " | ".join(history_entries)
 
         return (
             f"[!] {prefix}: {hex(code)} ({reason}) "
@@ -162,8 +189,12 @@ class SafeScan(cmd.Cmd):
             f"payload_len={len(payload)} size_field={size} "
             f"request_cmd={hex(req_code) if req_code is not None else 'unknown'} "
             f"request_len={len(req_payload)} request_ascii={req_ascii!r} request_hex={req_hex} "
+            f"request_packet_hex={req_packet_hex} "
             f"ascii={ascii_preview!r} hex={hex_preview} "
             f"header_hex={header_hex} packet_hex={packet_hex}"
+            + (f" prepare={prep}" if prep else "")
+            + (f" apply={apply}" if apply else "")
+            + (f" history=[{history_desc}]" if history_desc else "")
         )
 
     def _describe_reply(self, code):
