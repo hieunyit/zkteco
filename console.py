@@ -87,13 +87,13 @@ class SafeScan(cmd.Cmd):
             self.z.send_command(defs.CMD_PREPARE_DATA, prep_header)
             self.z.recv_reply()
             if not self.z.recvd_ack():
-                print(f"[!] Prepare-data rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                print(self._format_rejection("Prepare-data rejected"))
                 return False
 
             self.z.send_command(defs.CMD_DATA, data)
             self.z.recv_reply()
             if not self.z.recvd_ack():
-                print(f"[!] Data payload rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                print(self._format_rejection("Data payload rejected"))
                 return False
 
             return True
@@ -118,11 +118,43 @@ class SafeScan(cmd.Cmd):
             self.z.send_command(110, apply_payload)
             self.z.recv_reply()
             if not self.z.recvd_ack():
-                print(f"[!] Command apply rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
+                print(self._format_rejection("Command apply rejected"))
                 return True
 
         except Exception:
             traceback.print_exc()
+
+    def _format_rejection(self, prefix):
+        """Return a detailed rejection message for the last reply."""
+        code = self.z.last_reply_code
+        reason = self._describe_reply(code)
+        payload = self.z.last_payload_data or bytearray()
+        ascii_preview = payload.decode('latin-1', errors='replace')
+        hex_preview = payload.hex()
+        max_hex = 96
+        if len(hex_preview) > max_hex:
+            hex_preview = hex_preview[:max_hex] + "..."
+        return (
+            f"[!] {prefix}: {hex(code)} ({reason}) "
+            f"session={self.z.last_session_code} reply={self.z.last_reply_counter} "
+            f"payload_len={len(payload)} ascii={ascii_preview!r} hex={hex_preview}"
+        )
+
+    def _describe_reply(self, code):
+        """Map reply codes to human-readable names."""
+        replies = {
+            defs.CMD_ACK_OK: "CMD_ACK_OK",
+            defs.CMD_ACK_ERROR: "CMD_ACK_ERROR",
+            defs.CMD_ACK_DATA: "CMD_ACK_DATA",
+            defs.CMD_ACK_RETRY: "CMD_ACK_RETRY",
+            defs.CMD_ACK_REPEAT: "CMD_ACK_REPEAT",
+            defs.CMD_ACK_UNAUTH: "CMD_ACK_UNAUTH",
+            defs.CMD_ACK_UNKNOWN: "CMD_ACK_UNKNOWN",
+            defs.CMD_ACK_ERROR_CMD: "CMD_ACK_ERROR_CMD",
+            defs.CMD_ACK_ERROR_INIT: "CMD_ACK_ERROR_INIT",
+            defs.CMD_ACK_ERROR_DATA: "CMD_ACK_ERROR_DATA",
+        }
+        return replies.get(code, "UNKNOWN")
 
 
     def do_write_file(self, line):
