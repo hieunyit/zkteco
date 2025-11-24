@@ -122,7 +122,11 @@ class PacketMixin:
             self.send_command(DEFS.CMD_DATA_RDY, data=bytearray(rdy_struct))
 
             # receives the prepare data reply
-            self.recv_packet(24)
+            prep_pkt = self.recv_packet(24)
+            self.parse_ans(prep_pkt)
+            self.reply_number += 1
+            if self.last_reply_code != DEFS.CMD_PREPARE_DATA:
+                return dataset
 
             # receives packet with long dataset
             dataset = bytearray()
@@ -166,7 +170,25 @@ class PacketMixin:
         while len(self._recv_buffer) < 8:
             self._recv_buffer += self.recv_data(buff_size)
 
+        # discard any leading garbage before the start tag
+        start_tag = bytes(DEFS.START_TAG)
+        tag_pos = self._recv_buffer.find(start_tag)
+        while tag_pos not in (0, -1):
+            self._recv_buffer = self._recv_buffer[tag_pos:]
+            break
+
+        # ensure the buffer actually contains the start tag
+        while self._recv_buffer[:4] != start_tag:
+            self._recv_buffer += self.recv_data(buff_size)
+            tag_pos = self._recv_buffer.find(start_tag)
+            if tag_pos == -1:
+                continue
+            if tag_pos:
+                self._recv_buffer = self._recv_buffer[tag_pos:]
+
         # extracts size of the total packet
+        while len(self._recv_buffer) < 6:
+            self._recv_buffer += self.recv_data(buff_size)
         total_size = 8 + struct.unpack('<H', self._recv_buffer[4:6])[0]
 
         # keeps reading until it receives the complete packet
