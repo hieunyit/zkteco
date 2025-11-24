@@ -100,7 +100,7 @@ class SafeScan(cmd.Cmd):
 
     def do_write_file(self, line):
         if not len(line) or len(line.split(' ')) != 2:
-            print("[*] Usage: do_exploit_moto <file> <dest>")
+            print("[*] Usage: write_file <local_source> <remote_dest>")
             return True
         file = line.split(' ')[0]
         dest = line.split(' ')[1]
@@ -112,15 +112,23 @@ class SafeScan(cmd.Cmd):
 
         try:
             print("[-] Creating {}".format(file))
-            with open(file, 'r') as fp:
+            with open(file, 'rb') as fp:
                 payload = fp.read()
+        except FileNotFoundError:
+            print("[!] Local file not found: {}".format(file))
+            return True
+        except Exception:
+            traceback.print_exc()
+            return True
+
+        try:
 
             # prepare data
             self.z.send_command(1500, struct.pack('<II', len(payload), len(payload)))
             self.z.recv_reply()
 
             # send data
-            self.z.send_command(1501, payload.encode())
+            self.z.send_command(1501, payload)
             self.z.recv_reply()
 
             # apply data
