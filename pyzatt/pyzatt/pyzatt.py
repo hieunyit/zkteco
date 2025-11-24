@@ -163,6 +163,8 @@ class ZKSS(PacketMixin, DataUserMixin,
         self.att_log = []               # list of attendance entries
         self.op_log = []                # list of operation entries
         self._recv_buffer = bytearray()  # buffer for partial socket reads
+        self.last_packet = bytearray()   # last fully received packet
+        self.last_reply_size = 0         # reported payload size of last reply
 
     def add_user(self, user_sn):
         """

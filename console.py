@@ -128,16 +128,31 @@ class SafeScan(cmd.Cmd):
         """Return a detailed rejection message for the last reply."""
         code = self.z.last_reply_code
         reason = self._describe_reply(code)
+
         payload = self.z.last_payload_data or bytearray()
         ascii_preview = payload.decode('latin-1', errors='replace')
         hex_preview = payload.hex()
+
+        packet = getattr(self.z, "last_packet", bytearray()) or bytearray()
+        packet_hex = packet.hex()
+
         max_hex = 96
         if len(hex_preview) > max_hex:
             hex_preview = hex_preview[:max_hex] + "..."
+        if len(packet_hex) > max_hex:
+            packet_hex = packet_hex[:max_hex] + "..."
+
+        header = packet[:16]
+        header_hex = header.hex()
+
+        size = getattr(self.z, "last_reply_size", len(packet) - 8)
+
         return (
             f"[!] {prefix}: {hex(code)} ({reason}) "
             f"session={self.z.last_session_code} reply={self.z.last_reply_counter} "
-            f"payload_len={len(payload)} ascii={ascii_preview!r} hex={hex_preview}"
+            f"payload_len={len(payload)} size_field={size} "
+            f"ascii={ascii_preview!r} hex={hex_preview} "
+            f"header_hex={header_hex} packet_hex={packet_hex}"
         )
 
     def _describe_reply(self, code):
