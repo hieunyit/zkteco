@@ -108,6 +108,11 @@ class PacketMixin:
         elif self.last_reply_code == DEFS.CMD_ACK_OK:
             # device sent the dataset with additional commands, i.e. longer
             # dataset, see ex_data spec
+            if len(self.last_payload_data) < 5:
+                print("ACK payload too short to contain size info:",
+                      self.last_payload_data)
+                return dataset
+
             print(self.last_payload_data)
             size_info = struct.unpack('<I', self.last_payload_data[1:5])[0]
 
@@ -149,15 +154,24 @@ class PacketMixin:
         :param buff_size: Int, buffer size used for socket receive.
         :return: Bytearray, received data.
         """
-        zkp = self.recv_data(buff_size)
+        # ensure buffer exists
+        if not hasattr(self, '_recv_buffer'):
+            self._recv_buffer = bytearray()
+
+        # keep reading until we have at least a full header
+        while len(self._recv_buffer) < 8:
+            self._recv_buffer += self.recv_data(buff_size)
+
         # extracts size of the total packet
-        total_size = 8 + struct.unpack('<H', zkp[4:6])[0]
-        rem_recv = total_size - len(zkp)
+        total_size = 8 + struct.unpack('<H', self._recv_buffer[4:6])[0]
+
         # keeps reading until it receives the complete packet
-        while len(zkp) < total_size:
-            zkp += self.recv_data(rem_recv)
-            rem_recv = total_size - len(zkp)
-        return zkp
+        while len(self._recv_buffer) < total_size:
+            self._recv_buffer += self.recv_data(buff_size)
+
+        packet = self._recv_buffer[:total_size]
+        self._recv_buffer = self._recv_buffer[total_size:]
+        return packet
 
     def recv_data(self, buff_size=4096):
         """

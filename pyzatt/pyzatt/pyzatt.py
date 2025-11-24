@@ -162,6 +162,7 @@ class ZKSS(PacketMixin, DataUserMixin,
         self.users = {}                 # dict of ZKUser, the key is the id
         self.att_log = []               # list of attendance entries
         self.op_log = []                # list of operation entries
+        self._recv_buffer = bytearray()  # buffer for partial socket reads
 
     def add_user(self, user_sn):
         """

