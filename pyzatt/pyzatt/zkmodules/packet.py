@@ -70,8 +70,7 @@ class PacketMixin:
         :return: Bytearray, received data,
             also stored in last_payload_data.
         """
-        zkp = self.soc_zk.recv(buff_size)
-        zkp = bytearray(zkp)
+        zkp = self.recv_packet(buff_size)
         self.parse_ans(zkp)
         self.reply_number += 1
 
@@ -140,10 +139,15 @@ class PacketMixin:
             self.send_command(DEFS.CMD_FREE_DATA)
 
             # receive acknowledge
-            self.recv_packet(buff_size)
+            ack_pkt = self.recv_packet(buff_size)
+            self.parse_ans(ack_pkt)
 
             # update reply counter
             self.reply_number += 1
+
+        self.last_payload_data = dataset
+        if dataset:
+            self.last_reply_code = DEFS.CMD_DATA
 
         return dataset
 
